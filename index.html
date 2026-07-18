@@ -13460,59 +13460,97 @@ function heroSearchKey(e){
 </script>
 
 
+
+
 <script>
-/* LRC private-bucket asset resolver — injected by extractor. Edit BUCKET/getClient below. */
+/* LRC private-bucket asset resolver — v2 (watches for dynamically-added content). Edit BUCKET/TTL below if needed. */
 (function resolver(){
-    var BUCKET = 'lrc-assets';   // <-- set to your Storage bucket name
-    var TTL = 3600;              // signed-URL lifetime in seconds
-    function getClient(){
-      // Your page creates the client as _sb. Fallbacks kept just in case.
-      return window._sb || window.sb || window.supabaseClient || null;
-    }
+    var BUCKET = 'lrc-assets';
+    var TTL = 3600; // signed-URL lifetime (seconds)
+    function getClient(){ return window._sb || window.sb || window.supabaseClient || null; }
     var SCHEME = 'asset://';
+    var reTok = /asset:\/\/([A-Za-z0-9._\-]+)/g;
+    var map = new Map(), client = null, missing = new Set(), timer = null;
+
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
-    function collect(str, set){ var re=/asset:\/\/([^\s"')]+)/g, m; while((m=re.exec(str))) set.add(m[1]); }
+
     function boot(){
       var tries = 0;
-      (function waitClient(){
-        var client = getClient();
-        if (!client){
-          if (tries++ < 40){ setTimeout(waitClient, 250); return; }
-          console.error('[lrc-assets] Supabase client not found (expected window._sb). If _sb is not global, add "window._sb = _sb;" right after createClient.');
-          return;
-        }
-        // wait for an authenticated session before signing (RLS needs it)
-        client.auth.getSession().then(function(r){
-          if (r && r.data && r.data.session){ run(client); return; }
-          var done = false;
-          client.auth.onAuthStateChange(function(_e, session){ if (session && !done){ done = true; run(client); } });
-        }).catch(function(){ run(client); });
+      (function wait(){
+        var c = getClient();
+        if (!c){ if (tries++ < 60){ setTimeout(wait, 250); return; } console.error('[lrc-assets] Supabase client not found (window._sb).'); return; }
+        c.auth.getSession().then(function (r){
+          if (r && r.data && r.data.session) start(c);
+          else { var done = false; c.auth.onAuthStateChange(function (_e, s){ if (s && !done){ done = true; start(c); } }); }
+        }).catch(function (){ start(c); });
       })();
     }
-    async function run(client){
-      try{
-        var paths = new Set();
-        var dataEls = Array.prototype.slice.call(document.querySelectorAll('[data-asset]'));
-        dataEls.forEach(function(el){ paths.add(el.getAttribute('data-asset')); });
-        var styleEls = Array.prototype.slice.call(document.querySelectorAll('style'));
-        styleEls.forEach(function(n){ collect(n.textContent, paths); });
-        var attrHits = [], all = document.getElementsByTagName('*');
-        for (var i=0;i<all.length;i++){ var el=all[i]; if(!el.attributes) continue;
-          for (var j=0;j<el.attributes.length;j++){ var a=el.attributes[j];
-            if (a.value && a.value.indexOf(SCHEME)!==-1){ attrHits.push({el:el,name:a.name}); collect(a.value,paths); } } }
-        if (paths.size===0) return;
-        var list = Array.prototype.slice.call(paths), map = new Map();
-        for (var k=0;k<list.length;k+=100){
-          var res = await client.storage.from(BUCKET).createSignedUrls(list.slice(k,k+100), TTL);
+
+    async function signAll(list){
+      for (var k = 0; k < list.length; k += 100){
+        try {
+          var res = await client.storage.from(BUCKET).createSignedUrls(list.slice(k, k + 100), TTL);
           if (res.error){ console.error('[lrc-assets] signed-URL error', res.error); continue; }
-          (res.data||[]).forEach(function(d){ if(d.signedUrl) map.set(d.path, d.signedUrl); });
+          (res.data || []).forEach(function (d){ if (d.signedUrl) map.set(d.path, d.signedUrl); });
+        } catch (e){ console.error('[lrc-assets] sign failed', e); }
+      }
+    }
+
+    function queueSign(p){
+      if (map.has(p)) return;
+      missing.add(p);
+      if (timer) return;
+      timer = setTimeout(function (){
+        timer = null;
+        var list = Array.prototype.slice.call(missing); missing.clear();
+        if (client && list.length) signAll(list).then(function (){ applyAll(document); });
+      }, 120);
+    }
+
+    function swap(v){ return v.replace(reTok, function (mm, p){ if (map.has(p)) return map.get(p); queueSign(p); return mm; }); }
+
+    function fixEl(el){
+      if (!el || el.nodeType !== 1) return;
+      if (el.hasAttribute('data-asset')){
+        var p = el.getAttribute('data-asset'), attr = el.getAttribute('data-asset-attr') || 'src';
+        if (map.has(p)){ el.setAttribute(attr, map.get(p)); el.removeAttribute('data-asset'); el.removeAttribute('data-asset-attr'); }
+        else queueSign(p);
+      }
+      if (el.attributes){
+        for (var i = 0; i < el.attributes.length; i++){
+          var a = el.attributes[i];
+          if (a.value && a.value.indexOf(SCHEME) !== -1){ var nv = swap(a.value); if (nv !== a.value) el.setAttribute(a.name, nv); }
         }
-        function sub(s){ return s.replace(/asset:\/\/([^\s"')]+)/g, function(mm,p){ return map.get(p)||mm; }); }
-        dataEls.forEach(function(el){ var p=el.getAttribute('data-asset'), attr=el.getAttribute('data-asset-attr')||'src', u=map.get(p);
-          if(u){ el.setAttribute(attr,u); el.removeAttribute('data-asset'); el.removeAttribute('data-asset-attr'); } });
-        styleEls.forEach(function(n){ if(n.textContent.indexOf(SCHEME)!==-1) n.textContent = sub(n.textContent); });
-        attrHits.forEach(function(h){ h.el.setAttribute(h.name, sub(h.el.getAttribute(h.name))); });
-      } catch(e){ console.error('[lrc-assets] resolver failed', e); }
+      }
+    }
+
+    function applyAll(root){
+      if (root.nodeType === 1) fixEl(root);
+      var els = root.getElementsByTagName ? root.getElementsByTagName('*') : (root.querySelectorAll ? root.querySelectorAll('*') : []);
+      for (var i = 0; i < els.length; i++) fixEl(els[i]);
+      var styles = root.querySelectorAll ? root.querySelectorAll('style') : [];
+      Array.prototype.forEach.call(styles, function (n){ if (n.textContent.indexOf(SCHEME) !== -1) n.textContent = swap(n.textContent); });
+    }
+
+    async function start(c){
+      client = c;
+      try {
+        // discover every asset:// token in the page (attributes AND inline script data)
+        var set = new Set(), m; reTok.lastIndex = 0;
+        var whole = document.documentElement.innerHTML;
+        while ((m = reTok.exec(whole))) set.add(m[1]);
+        await signAll(Array.prototype.slice.call(set));
+        applyAll(document);
+        // keep resolving content added later (modals built on click, etc.)
+        var obs = new MutationObserver(function (muts){
+          for (var i = 0; i < muts.length; i++){
+            var mu = muts[i];
+            if (mu.type === 'attributes') fixEl(mu.target);
+            else for (var j = 0; j < mu.addedNodes.length; j++){ var n = mu.addedNodes[j]; if (n.nodeType === 1) applyAll(n); }
+          }
+        });
+        obs.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['src','href','poster','data','style','data-asset'] });
+      } catch (e){ console.error('[lrc-assets] resolver failed', e); }
     }
   })();
 </script>
