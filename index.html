@@ -51,7 +51,7 @@
   function sbClient(){
     if (_sb) return _sb;
     if (!window.supabase) return null;
-    window._sb = window._sb = _sb = window.supabase.createClient(LRC_SB_URL, LRC_SB_KEY, {
+    window._sb = _sb = window.supabase.createClient(LRC_SB_URL, LRC_SB_KEY, {
       auth: { persistSession: true, autoRefreshToken: true }
     });
     return _sb;
