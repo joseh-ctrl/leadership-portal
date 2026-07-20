@@ -13464,6 +13464,8 @@ function heroSearchKey(e){
 
 
 
+
+
 <script>
 /* LRC private-bucket asset resolver — v3 (watches for dynamically-added content; no auth-session gate). Edit BUCKET/TTL below if needed. */
 (function resolver(){
@@ -13481,9 +13483,24 @@ function heroSearchKey(e){
       (function wait(){
         var c = getClient();
         if (!c){ if (tries++ < 60){ setTimeout(wait, 250); return; } console.error('[lrc-assets] Supabase client not found (window._sb).'); return; }
-        // No auth-session gate: this app uses its own token flow (LRC_TOKEN / adoptSession),
-        // so _sb.auth.getSession() never resolves. Signing works via the fetch shim + RLS policy.
-        start(c);
+        // This app uses its own token flow (LRC_TOKEN / LRC_SESSION_READY / adoptSession),
+        // NOT Supabase's session. Sign only after that token exists, or storage returns
+        // per-item permission errors and nothing resolves.
+        var waited = 0;
+        function ready(){
+          if (window.LRC_TOKEN) return true;
+          return false;
+        }
+        (function hold(){
+          if (ready()){ start(c); return; }
+          if (window.LRC_SESSION_READY && typeof window.LRC_SESSION_READY.then === 'function'){
+            window.LRC_SESSION_READY.then(function (){ start(c); }, function (){ start(c); });
+            return;
+          }
+          if (waited++ < 120){ setTimeout(hold, 250); return; }
+          console.warn('[lrc-assets] no LRC_TOKEN after 30s — signing anyway');
+          start(c);
+        })();
       })();
     }
 
@@ -13492,7 +13509,13 @@ function heroSearchKey(e){
         try {
           var res = await client.storage.from(BUCKET).createSignedUrls(list.slice(k, k + 100), TTL);
           if (res.error){ console.error('[lrc-assets] signed-URL error', res.error); continue; }
-          (res.data || []).forEach(function (d){ if (d.signedUrl) map.set(d.path, d.signedUrl); });
+          var failed = 0, firstErr = null;
+          (res.data || []).forEach(function (d){
+            if (d.signedUrl) map.set(d.path, d.signedUrl);
+            else { failed++; if (!firstErr) firstErr = d.error || 'unknown'; }
+          });
+          if (failed) console.error('[lrc-assets] ' + failed + ' asset(s) could not be signed. First error:', firstErr);
+          else console.log('[lrc-assets] signed ' + map.size + ' asset(s)');
         } catch (e){ console.error('[lrc-assets] sign failed', e); }
       }
     }
