@@ -13471,135 +13471,91 @@ function heroSearchKey(e){
 
 
 <script>
-/* LRC private-bucket asset resolver — v3 (watches for dynamically-added content; no auth-session gate). Edit BUCKET/TTL below if needed. */
-(function resolver(){
-    var BUCKET = 'lrc-assets';
-    var TTL = 3600; // signed-URL lifetime (seconds)
-    function getClient(){ return window._sb || window.sb || window.supabaseClient || null; }
-    var SCHEME = 'asset://';
-    var reTok = /asset:\/\/([A-Za-z0-9._\-]+)/g;
-    var map = new Map(), client = null, missing = new Set(), timer = null;
+(function () {
+  const SB_URL = 'https://zozpomjvvrhjgqbazmrd.supabase.co';
+  const SB_KEY = 'sb_publishable_sKcs24iSLfda4g7gvXJcAw_HLmuLsdf';
+  const BUCKET = 'lrc-assets';
+  const BLANK  = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+  const cache  = new Map();   // filename -> signed url
+  let pending  = new Set();
+  let flushing = false;
 
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+  // 1. Move asset:// tokens off src/href so the browser stops trying to fetch them.
+  function harvest(root) {
+    root.querySelectorAll('[src^="asset://"], [href^="asset://"]').forEach(el => {
+      const attr = el.hasAttribute('src') ? 'src' : 'href';
+      const file = el.getAttribute(attr).slice(8);
+      el.setAttribute('data-asset', file);
+      el.setAttribute('data-asset-attr', attr);
+      if (attr === 'src') el.setAttribute('src', BLANK);
+      else el.removeAttribute('href');
+    });
+    const todo = root.querySelectorAll('[data-asset]:not([data-asset-done])');
+    todo.forEach(el => pending.add(el.getAttribute('data-asset')));
+    if (todo.length) console.log('[lrc-assets] found ' + todo.length + ' asset reference(s)');
+    if (pending.size) schedule();
+  }
 
-    function boot(){
-      var tries = 0;
-      (function wait(){
-        var c = getClient();
-        if (!c){ if (tries++ < 60){ setTimeout(wait, 250); return; } console.error('[lrc-assets] Supabase client not found (window._sb).'); return; }
-        // This app uses its own token flow (LRC_TOKEN / LRC_SESSION_READY / adoptSession),
-        // NOT Supabase's session. Sign only after that token exists, or storage returns
-        // per-item permission errors and nothing resolves.
-        var waited = 0;
-        function ready(){
-          if (window.LRC_TOKEN) return true;
-          return false;
-        }
-        (function hold(){
-          if (ready()){ start(c); return; }
-          if (window.LRC_SESSION_READY && typeof window.LRC_SESSION_READY.then === 'function'){
-            window.LRC_SESSION_READY.then(function (){ start(c); }, function (){ start(c); });
-            return;
-          }
-          if (waited++ < 120){ setTimeout(hold, 250); return; }
-          console.warn('[lrc-assets] no LRC_TOKEN after 30s — signing anyway');
-          start(c);
-        })();
-      })();
-    }
+  function schedule() {
+    if (flushing) return;
+    flushing = true;
+    setTimeout(flush, 50);
+  }
 
-    async function signAll(list){
-      for (var k = 0; k < list.length; k += 100){
-        try {
-          var call = client.storage.from(BUCKET).createSignedUrls(list.slice(k, k + 100), TTL);
-          var res = await Promise.race([call, new Promise(function (_r, rej){
-            setTimeout(function (){ rej(new Error('timeout')); }, 8000);
-          })]);
-          if (res.error){ console.error('[lrc-assets] signed-URL error', res.error); continue; }
-          var failed = 0, firstErr = null;
-          (res.data || []).forEach(function (d){
-            if (d.signedUrl) map.set(d.path, d.signedUrl);
-            else { failed++; if (!firstErr) firstErr = d.error || 'unknown'; }
-          });
-          if (failed) console.error('[lrc-assets] ' + failed + ' asset(s) could not be signed. First error:', firstErr);
-          else console.log('[lrc-assets] signed ' + map.size + ' asset(s)');
-        } catch (e){ console.error('[lrc-assets] sign failed', e); }
-      }
-    }
-
-    function queueSign(p){
-      if (map.has(p)) return;
-      missing.add(p);
-      if (timer) return;
-      timer = setTimeout(function (){
-        timer = null;
-        var list = Array.prototype.slice.call(missing); missing.clear();
-        if (client && list.length) signAll(list).then(function (){ applyAll(document); });
-      }, 120);
-    }
-
-    function swap(v){ return v.replace(reTok, function (mm, p){ if (map.has(p)) return map.get(p); queueSign(p); return mm; }); }
-
-    function fixEl(el){
-      if (!el || el.nodeType !== 1) return;
-      if (el.hasAttribute('data-asset')){
-        var p = el.getAttribute('data-asset'), attr = el.getAttribute('data-asset-attr') || 'src';
-        if (map.has(p)){ el.setAttribute(attr, map.get(p)); el.removeAttribute('data-asset'); el.removeAttribute('data-asset-attr'); }
-        else queueSign(p);
-      }
-      if (el.attributes){
-        for (var i = 0; i < el.attributes.length; i++){
-          var a = el.attributes[i];
-          if (a.value && a.value.indexOf(SCHEME) !== -1){ var nv = swap(a.value); if (nv !== a.value) el.setAttribute(a.name, nv); }
-        }
-      }
-    }
-
-    function applyAll(root){
-      if (root.nodeType === 1) fixEl(root);
-      var els = root.getElementsByTagName ? root.getElementsByTagName('*') : (root.querySelectorAll ? root.querySelectorAll('*') : []);
-      for (var i = 0; i < els.length; i++) fixEl(els[i]);
-      var styles = root.querySelectorAll ? root.querySelectorAll('style') : [];
-      Array.prototype.forEach.call(styles, function (n){ if (n.textContent.indexOf(SCHEME) !== -1) n.textContent = swap(n.textContent); });
-    }
-
-    async function start(c){
-      client = c;
-      var attempt = 0;
-      (async function cycle(){
-        attempt++;
-        try { await resolveOnce(attempt); }
-        catch (e){ console.error('[lrc-assets] attempt ' + attempt + ' failed', e); }
-        if (map.size === 0 && attempt < 10){ setTimeout(cycle, 2000); }
-      })();
-    }
-
-    async function resolveOnce(attempt){
+  async function flush() {
+    flushing = false;
+    if (!window.LRC_TOKEN) { setTimeout(schedule, 500); return; }
+    const paths = [...pending].filter(p => !cache.has(p));
+    pending = new Set();
+    for (let i = 0; i < paths.length; i += 100) {
+      const chunk = paths.slice(i, i + 100);
       try {
-        // discover every asset:// token in the page (attributes AND inline script data)
-        var set = new Set(), m; reTok.lastIndex = 0;
-        var whole = document.documentElement.innerHTML;
-        while ((m = reTok.exec(whole))) set.add(m[1]);
-        // data-asset attributes hold a bare filename (no asset:// prefix), so the
-        // regex above never sees them — collect them explicitly.
-        Array.prototype.forEach.call(document.querySelectorAll('[data-asset]'), function (el){
-          var p = el.getAttribute('data-asset'); if (p) set.add(p);
+        const r = await fetch(SB_URL + '/storage/v1/object/sign/' + BUCKET, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: SB_KEY,
+            Authorization: 'Bearer ' + window.LRC_TOKEN
+          },
+          body: JSON.stringify({ expiresIn: 3600, paths: chunk })
         });
-        console.log('[lrc-assets] found ' + set.size + ' asset reference(s)');
-        await signAll(Array.prototype.slice.call(set));
-        applyAll(document);
-        // keep resolving content added later (modals built on click, etc.)
-        var obs = new MutationObserver(function (muts){
-          for (var i = 0; i < muts.length; i++){
-            var mu = muts[i];
-            if (mu.type === 'attributes') fixEl(mu.target);
-            else for (var j = 0; j < mu.addedNodes.length; j++){ var n = mu.addedNodes[j]; if (n.nodeType === 1) applyAll(n); }
-          }
+        if (!r.ok) { console.error('[lrc-assets] sign failed', r.status, await r.text()); continue; }
+        (await r.json()).forEach(row => {
+          if (row.error) console.error('[lrc-assets]', row.path, row.error);
+          else cache.set(row.path, SB_URL + '/storage/v1' + row.signedURL);
         });
-        obs.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['src','href','poster','data','style','data-asset'] });
-      } catch (e){ console.error('[lrc-assets] resolver failed', e); }
+      } catch (e) { console.error('[lrc-assets] sign threw', e); }
     }
-  })();
+    apply();
+  }
+
+  function apply() {
+    let n = 0;
+    document.querySelectorAll('[data-asset]:not([data-asset-done])').forEach(el => {
+      const url = cache.get(el.getAttribute('data-asset'));
+      if (!url) return;
+      el.setAttribute(el.getAttribute('data-asset-attr') || 'src', url);
+      el.setAttribute('data-asset-done', '1');
+      n++;
+    });
+    console.log('[lrc-assets] signed ' + cache.size + ', applied ' + n);
+  }
+
+  // 2. childList only — never attributes, or writing src retriggers us.
+  new MutationObserver(muts => {
+    let hit = false;
+    muts.forEach(m => m.addedNodes.forEach(node => {
+      if (node.nodeType !== 1) return;
+      harvest(node);
+      hit = true;
+    }));
+    if (hit) apply();
+  }).observe(document.documentElement, { childList: true, subtree: true });
+
+  window.addEventListener('LRC_SESSION_READY', () => harvest(document));
+  if (document.readyState !== 'loading') harvest(document);
+  else document.addEventListener('DOMContentLoaded', () => harvest(document));
+})();
 </script>
 </body>
 </html>
