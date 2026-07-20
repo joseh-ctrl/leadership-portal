@@ -13466,6 +13466,8 @@ function heroSearchKey(e){
 
 
 
+
+
 <script>
 /* LRC private-bucket asset resolver — v3 (watches for dynamically-added content; no auth-session gate). Edit BUCKET/TTL below if needed. */
 (function resolver(){
@@ -13563,6 +13565,12 @@ function heroSearchKey(e){
         var set = new Set(), m; reTok.lastIndex = 0;
         var whole = document.documentElement.innerHTML;
         while ((m = reTok.exec(whole))) set.add(m[1]);
+        // data-asset attributes hold a bare filename (no asset:// prefix), so the
+        // regex above never sees them — collect them explicitly.
+        Array.prototype.forEach.call(document.querySelectorAll('[data-asset]'), function (el){
+          var p = el.getAttribute('data-asset'); if (p) set.add(p);
+        });
+        console.log('[lrc-assets] found ' + set.size + ' asset reference(s)');
         await signAll(Array.prototype.slice.call(set));
         applyAll(document);
         // keep resolving content added later (modals built on click, etc.)
