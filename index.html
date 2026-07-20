@@ -13560,6 +13560,128 @@ function heroSearchKey(e){
   const SB_URL = 'https://zozpomjvvrhjgqbazmrd.supabase.co';
   const SB_KEY = 'sb_publishable_sKcs24iSLfda4g7gvXJcAw_HLmuLsdf';
   const BUCKET = 'lrc-assets';
+  const MODAL_ID = 'policy-image-modal-v99';
+
+  let lastKey = null, lastTitle = null;
+
+  function pdfMap() {
+    try { return POLICY_PDFS; } catch (e) { return window.POLICY_PDFS || {}; }
+  }
+
+  async function signOne(file) {
+    const r = await fetch(SB_URL + '/storage/v1/object/sign/' + BUCKET + '/' + file, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SB_KEY,
+        Authorization: 'Bearer ' + window.LRC_TOKEN
+      },
+      body: JSON.stringify({ expiresIn: 3600 })
+    });
+    if (!r.ok) { console.error('[lrc-assets] sign failed', r.status, await r.text()); return null; }
+    return SB_URL + '/storage/v1' + (await r.json()).signedURL;
+  }
+
+  async function urlFor(el) {
+    const file = el.getAttribute('data-asset');
+    if (file) return await signOne(file);
+    const href = el.getAttribute('href') || '';
+    if (href.startsWith('asset://')) return await signOne(href.slice(8));
+    if (href.startsWith('http')) return href;
+    return null;
+  }
+
+  // ---- capture which policy key was clicked, straight from the onclick attribute ----
+  document.addEventListener('click', e => {
+    const card = e.target.closest('[onclick*="openPdfPolicy"]');
+    if (!card) return;
+    const m = (card.getAttribute('onclick') || '')
+      .match(/openPdfPolicy\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]*)['"])?/);
+    if (m) { lastKey = m[1]; lastTitle = m[2] || ''; console.log('[lrc-assets] key ' + lastKey); }
+  }, true);
+
+  // ---- click interceptor ----
+  document.addEventListener('click', async e => {
+    const el = e.target.closest('#policy-pdf-view-btn, [data-asset], [href^="asset://"]');
+    if (!el) return;
+    const isView = el.id === 'policy-pdf-view-btn';
+    const isDownload = el.hasAttribute('download');
+    if (!isView && !isDownload) return;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    const tab = isView ? window.open('', '_blank') : null;
+
+    let url;
+    if (isView) {
+      const sib = el.closest('.policy-pdf-tools')?.querySelector('[data-asset]');
+      url = sib ? await urlFor(sib) : null;
+    } else {
+      url = await urlFor(el);
+    }
+
+    if (!url) { tab?.close(); console.error('[lrc-assets] no url'); return; }
+    if (isView) { tab.location = url; return; }
+
+    try {
+      const blob = await (await fetch(url)).blob();
+      const obj = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = obj;
+      link.download = el.getAttribute('download') || 'document.pdf';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(obj), 10000);
+      console.log('[lrc-assets] downloaded ' + link.download);
+    } catch (err) {
+      console.error('[lrc-assets] download failed', err);
+    }
+  }, true);
+
+  // ---- toolbar injection ----
+  function fileName(title) {
+    try { if (typeof lrcPdfFileName === 'function') return lrcPdfFileName(title); } catch (e) {}
+    return String(title || 'document').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-') + '.pdf';
+  }
+
+  function inject() {
+    const modal = document.getElementById(MODAL_ID);
+    if (!modal || getComputedStyle(modal).display === 'none') return;
+    if (modal.querySelector('.lrc-pdf-tools')) return;
+
+    const pdf = pdfMap()[lastKey];
+    if (!pdf) { console.warn('[lrc-assets] no pdf mapped for', lastKey); return; }
+    const file = pdf.replace(/^asset:\/\//, '');
+
+    const dialog = modal.firstElementChild || modal;
+    const bar = document.createElement('div');
+    bar.className = 'policy-pdf-tools lrc-pdf-tools';
+    bar.style.cssText = 'display:flex;gap:10px;padding:12px 16px;background:#fff;border-bottom:1px solid #e5e7eb;';
+    bar.innerHTML =
+      '<button class="btn btn-primary" type="button" id="policy-pdf-view-btn">View PDF</button>' +
+      '<a class="btn" download="' + fileName(lastTitle) + '" data-asset="' + file + '" href="#">Download</a>';
+
+    const head = dialog.firstElementChild;
+    if (head && head.nextSibling) dialog.insertBefore(bar, head.nextSibling);
+    else dialog.insertBefore(bar, dialog.firstChild);
+    console.log('[lrc-assets] toolbar injected for ' + lastKey);
+  }
+
+  const target = document.getElementById(MODAL_ID);
+  new MutationObserver(inject).observe(
+    target || document.body,
+    target ? { attributes: true, attributeFilter: ['style', 'class'] }
+           : { childList: true, subtree: true }
+  );
+
+  console.log('[lrc-assets] v10 armed');
+})();
+(function () {
+  const SB_URL = 'https://zozpomjvvrhjgqbazmrd.supabase.co';
+  const SB_KEY = 'sb_publishable_sKcs24iSLfda4g7gvXJcAw_HLmuLsdf';
+  const BUCKET = 'lrc-assets';
 
   async function signOne(file) {
     const r = await fetch(SB_URL + '/storage/v1/object/sign/' + BUCKET + '/' + file, {
