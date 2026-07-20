@@ -13597,7 +13597,7 @@ function heroSearchKey(e){
     if (!card) return;
     const m = (card.getAttribute('onclick') || '')
       .match(/openPdfPolicy\(\s*['"]([^'"]+)['"]\s*(?:,\s*['"]([^'"]*)['"])?/);
-    if (m) { lastKey = m[1]; lastTitle = m[2] || ''; console.log('[lrc-assets] key ' + lastKey); }
+    if (m) { lastKey = m[1]; lastTitle = m[2] || ''; console.log('[lrc-assets] key ' + lastKey); scheduleInject(); }
   }, true);
 
   // ---- click interceptor ----
@@ -13646,27 +13646,38 @@ function heroSearchKey(e){
     return String(title || 'document').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-') + '.pdf';
   }
 
-  function inject() {
+function inject() {
     const modal = document.getElementById(MODAL_ID);
     if (!modal || getComputedStyle(modal).display === 'none') return;
-    if (modal.querySelector('.lrc-pdf-tools')) return;
+    if (!lastKey) return;
 
     const pdf = pdfMap()[lastKey];
     if (!pdf) { console.warn('[lrc-assets] no pdf mapped for', lastKey); return; }
     const file = pdf.replace(/^asset:\/\//, '');
 
-    const dialog = modal.firstElementChild || modal;
-    const bar = document.createElement('div');
-    bar.className = 'policy-pdf-tools lrc-pdf-tools';
-    bar.style.cssText = 'display:flex;gap:10px;padding:12px 16px;background:#fff;border-bottom:1px solid #e5e7eb;';
-    bar.innerHTML =
-      '<button class="btn btn-primary" type="button" id="policy-pdf-view-btn">View PDF</button>' +
-      '<a class="btn" download="' + fileName(lastTitle) + '" data-asset="' + file + '" href="#">Download</a>';
+    let bar = modal.querySelector('.lrc-pdf-tools');
+    if (!bar) {
+      const dialog = modal.firstElementChild || modal;
+      bar = document.createElement('div');
+      bar.className = 'policy-pdf-tools lrc-pdf-tools';
+      bar.style.cssText = 'display:flex;gap:10px;padding:12px 16px;background:#fff;border-bottom:1px solid #e5e7eb;';
+      bar.innerHTML =
+        '<button class="btn btn-primary" type="button" id="policy-pdf-view-btn">View PDF</button>' +
+        '<a class="btn" href="#">Download</a>';
+      }
 
-    const head = dialog.firstElementChild;
-    if (head && head.nextSibling) dialog.insertBefore(bar, head.nextSibling);
-    else dialog.insertBefore(bar, dialog.firstChild);
-    console.log('[lrc-assets] toolbar injected for ' + lastKey);
+    const dl = bar.querySelector('a');
+    if (dl.getAttribute('data-asset') !== file) {
+      dl.setAttribute('data-asset', file);
+      dl.setAttribute('download', fileName(lastTitle));
+      console.log('[lrc-assets] toolbar set for ' + lastKey + ' \u2192 ' + file);
+    }
+  }
+
+  function scheduleInject() {
+    requestAnimationFrame(inject);
+    setTimeout(inject, 80);
+    setTimeout(inject, 300);
   }
 
   const target = document.getElementById(MODAL_ID);
