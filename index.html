@@ -13462,8 +13462,10 @@ function heroSearchKey(e){
 
 
 
+
+
 <script>
-/* LRC private-bucket asset resolver — v2 (watches for dynamically-added content). Edit BUCKET/TTL below if needed. */
+/* LRC private-bucket asset resolver — v3 (watches for dynamically-added content; no auth-session gate). Edit BUCKET/TTL below if needed. */
 (function resolver(){
     var BUCKET = 'lrc-assets';
     var TTL = 3600; // signed-URL lifetime (seconds)
@@ -13479,10 +13481,9 @@ function heroSearchKey(e){
       (function wait(){
         var c = getClient();
         if (!c){ if (tries++ < 60){ setTimeout(wait, 250); return; } console.error('[lrc-assets] Supabase client not found (window._sb).'); return; }
-        c.auth.getSession().then(function (r){
-          if (r && r.data && r.data.session) start(c);
-          else { var done = false; c.auth.onAuthStateChange(function (_e, s){ if (s && !done){ done = true; start(c); } }); }
-        }).catch(function (){ start(c); });
+        // No auth-session gate: this app uses its own token flow (LRC_TOKEN / adoptSession),
+        // so _sb.auth.getSession() never resolves. Signing works via the fetch shim + RLS policy.
+        start(c);
       })();
     }
 
