@@ -13683,10 +13683,9 @@ function inject() {
   const target = document.getElementById(MODAL_ID);
   new MutationObserver(inject).observe(
     target || document.body,
-    target ? { attributes: true, attributeFilter: ['style', 'class'] }
+    target ? { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] }
            : { childList: true, subtree: true }
   );
-
   console.log('[lrc-assets] v10 armed');
 })();
 (function () {
