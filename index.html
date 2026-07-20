@@ -13556,6 +13556,77 @@ function heroSearchKey(e){
   if (document.readyState !== 'loading') harvest(document);
   else document.addEventListener('DOMContentLoaded', () => harvest(document));
 })();
+(function () {
+  const SB_URL = 'https://zozpomjvvrhjgqbazmrd.supabase.co';
+  const SB_KEY = 'sb_publishable_sKcs24iSLfda4g7gvXJcAw_HLmuLsdf';
+  const BUCKET = 'lrc-assets';
+
+  async function signOne(file) {
+    const r = await fetch(SB_URL + '/storage/v1/object/sign/' + BUCKET + '/' + file, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SB_KEY,
+        Authorization: 'Bearer ' + window.LRC_TOKEN
+      },
+      body: JSON.stringify({ expiresIn: 3600 })
+    });
+    if (!r.ok) { console.error('[lrc-assets] sign failed', r.status, await r.text()); return null; }
+    return SB_URL + '/storage/v1' + (await r.json()).signedURL;
+  }
+
+  async function urlFor(el) {
+    const file = el.getAttribute('data-asset');
+    if (file) return await signOne(file);            // always re-sign; never trust a stale URL
+    const href = el.getAttribute('href') || '';
+    if (href.startsWith('asset://')) return await signOne(href.slice(8));
+    if (href.startsWith('http')) return href;
+    return null;
+  }
+
+  document.addEventListener('click', async e => {
+    const el = e.target.closest('#policy-pdf-view-btn, [data-asset], [href^="asset://"]');
+    if (!el) return;
+
+    const isView = el.id === 'policy-pdf-view-btn';
+    const isDownload = el.hasAttribute('download');
+    if (!isView && !isDownload) return;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+
+    const tab = isView ? window.open('', '_blank') : null;
+
+    let url;
+    if (isView) {
+      const sib = el.closest('.policy-pdf-tools')?.querySelector('[data-asset]')
+               || document.getElementById('policy-pdf-download');
+      url = sib ? await urlFor(sib) : null;
+    } else {
+      url = await urlFor(el);
+    }
+
+    if (!url) { tab?.close(); console.error('[lrc-assets] no url'); return; }
+    if (isView) { tab.location = url; return; }
+
+    try {
+      const blob = await (await fetch(url)).blob();
+      const obj = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = obj;
+      link.download = el.getAttribute('download') || 'document.pdf';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(obj), 10000);
+      console.log('[lrc-assets] downloaded ' + link.download);
+    } catch (err) {
+      console.error('[lrc-assets] download failed', err);
+    }
+  }, true);
+
+  console.log('[lrc-assets] interceptor armed (v8b)');
+})();
 </script>
 </body>
 </html>
