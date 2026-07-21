@@ -9628,31 +9628,16 @@ function generateTrainingRecordPdf(){
     });
   }
 
-  function addLogoToDashboard(){
-    const dash = document.getElementById('screen-dashboard');
-    if(!dash || !WS_LOGO_TEMP) return;
-    const heroCopy = dash.querySelector('.lrc-hero-copy');
-    if(!heroCopy || heroCopy.querySelector('.dashboard-ws-logo')) return;
-    const img = document.createElement('img');
-    img.className = 'dashboard-ws-logo';
-    img.src = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
-    img.setAttribute('data-asset', WS_LOGO_TEMP.replace(/^asset:\/\//, ''));
-    img.setAttribute('data-asset-attr', 'src');
-    img.alt = 'WS Display';
-    img.style.cssText = 'display:block;width:220px;max-width:78%;height:auto;margin:0 0 18px 0;background:#fff;padding:6px 8px;border-radius:4px;';
-    heroCopy.insertBefore(img, heroCopy.firstChild);
-  }
-
   window.tempStep = tempStep;
   window.updateExecNotice = updateExecNotice;
   window.downloadTempStaffingRequestPdf = downloadTempStaffingRequestPdf;
 
   if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', function(){ replaceTempStaffingScreen(); keepTempNavLabel(); addLogoToDashboard(); });
+    document.addEventListener('DOMContentLoaded', function(){ replaceTempStaffingScreen(); keepTempNavLabel(); });
   } else {
-    replaceTempStaffingScreen(); keepTempNavLabel(); addLogoToDashboard();
+    replaceTempStaffingScreen(); keepTempNavLabel();
   }
-  setInterval(function(){ keepTempNavLabel(); addLogoToDashboard(); }, 1500);
+  setInterval(function(){ keepTempNavLabel(); }, 1500);
 })();
 </script>
 
