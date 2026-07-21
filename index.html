@@ -13759,5 +13759,98 @@ function inject() {
   console.log('[lrc-assets] interceptor armed (v8b)');
 })();
 </script>
+<script>
+/* ── lrc-assets: jsPDF asset resolver (v1) ──────────────────────────────
+   jsPDF's addImage() is synchronous and cannot resolve asset:// tokens.
+   We prewarm every PDF asset into base64 data URLs once the session is
+   ready, then patch addImage to swap tokens for cached data. No export
+   function needs to change.
+   ------------------------------------------------------------------- */
+(function () {
+  const SB_URL = 'https://zozpomjvvrhjgqbazmrd.supabase.co';
+  const SB_KEY = 'sb_publishable_sKcs24iSLfda4g7gvXJcAw_HLmuLsdf';
+  const BUCKET = 'lrc-assets';
+
+  const PDF_ASSETS = [
+    'asset-673be93eb1dc31b8.jpg', // WS Display logo (4 exports)
+    'asset-c888236fa86939aa.jpg', // accident report logo
+    'asset-e2b645a12e13839f.jpg', // injury report full-page template
+    'asset-806ae09a3f327d72.jpg', // WSD logo
+    'asset-c18d6143d859e4eb.jpg'  // training record full-page template
+  ];
+
+  const cache = new Map();   // filename -> data URL
+  const inflight = new Map();
+
+  async function toDataUrl(file) {
+    const r = await fetch(SB_URL + '/storage/v1/object/sign/' + BUCKET + '/' + file, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SB_KEY,
+        Authorization: 'Bearer ' + window.LRC_TOKEN
+      },
+      body: JSON.stringify({ expiresIn: 3600 })
+    });
+    if (!r.ok) throw new Error('sign ' + r.status);
+    const signed = SB_URL + '/storage/v1' + (await r.json()).signedURL;
+    const blob = await (await fetch(signed)).blob();
+    return await new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = rej;
+      fr.readAsDataURL(blob);
+    });
+  }
+
+  function load(file) {
+    if (cache.has(file)) return Promise.resolve(cache.get(file));
+    if (inflight.has(file)) return inflight.get(file);
+    const p = toDataUrl(file)
+      .then(d => { cache.set(file, d); inflight.delete(file); return d; })
+      .catch(e => { inflight.delete(file); console.error('[lrc-pdf] failed ' + file, e); return null; });
+    inflight.set(file, p);
+    return p;
+  }
+
+  window.lrcPdfAssetsReady = function () {
+    return Promise.all(PDF_ASSETS.map(load));
+  };
+
+  (window.LRC_SESSION_READY || Promise.resolve())
+    .then(() => window.lrcPdfAssetsReady())
+    .then(r => console.log('[lrc-pdf] prewarmed ' + r.filter(Boolean).length + '/' + PDF_ASSETS.length));
+
+  function patch() {
+    const jsPDF = (window.jspdf || {}).jsPDF;
+    if (!jsPDF || !jsPDF.API || jsPDF.API.__lrcAssetPatched) return !!(jsPDF && jsPDF.API);
+    const orig = jsPDF.API.addImage;
+    jsPDF.API.addImage = function (img) {
+      if (typeof img === 'string' && img.indexOf('asset://') === 0) {
+        const file = img.slice(8);
+        const data = cache.get(file);
+        if (!data) {
+          console.warn('[lrc-pdf] asset not ready, image skipped: ' + file);
+          load(file);
+          return this;
+        }
+        const args = Array.prototype.slice.call(arguments);
+        args[0] = data;
+        return orig.apply(this, args);
+      }
+      return orig.apply(this, arguments);
+    };
+    jsPDF.API.__lrcAssetPatched = true;
+    console.log('[lrc-pdf] addImage patched');
+    return true;
+  }
+
+  if (!patch()) {
+    let tries = 0;
+    const t = setInterval(() => { if (patch() || ++tries > 40) clearInterval(t); }, 250);
+  }
+})();
+</script>
+
 </body>
 </html>
