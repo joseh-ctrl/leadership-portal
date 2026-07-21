@@ -9635,7 +9635,9 @@ function generateTrainingRecordPdf(){
     if(!heroCopy || heroCopy.querySelector('.dashboard-ws-logo')) return;
     const img = document.createElement('img');
     img.className = 'dashboard-ws-logo';
-    img.src = WS_LOGO_TEMP;
+    img.src = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+    img.setAttribute('data-asset', WS_LOGO_TEMP.replace(/^asset:\/\//, ''));
+    img.setAttribute('data-asset-attr', 'src');
     img.alt = 'WS Display';
     img.style.cssText = 'display:block;width:220px;max-width:78%;height:auto;margin:0 0 18px 0;background:#fff;padding:6px 8px;border-radius:4px;';
     heroCopy.insertBefore(img, heroCopy.firstChild);
@@ -13482,7 +13484,13 @@ function heroSearchKey(e){
 
   // 1. Move asset:// tokens off src/href so the browser stops trying to fetch them.
   function harvest(root) {
-    root.querySelectorAll('[src^="asset://"], [href^="asset://"]').forEach(el => {
+    const self = (root.nodeType === 1 && root.matches) ? root : null;
+    const scan = sel => {
+      const out = [...root.querySelectorAll(sel)];
+      if (self && self.matches(sel)) out.unshift(self);
+      return out;
+    };
+    scan('[src^="asset://"], [href^="asset://"]').forEach(el => {
       const attr = el.hasAttribute('src') ? 'src' : 'href';
       const file = el.getAttribute(attr).slice(8);
       el.setAttribute('data-asset', file);
@@ -13490,7 +13498,7 @@ function heroSearchKey(e){
       if (attr === 'src') el.setAttribute('src', BLANK);
       else el.removeAttribute('href');
     });
-    const todo = root.querySelectorAll('[data-asset]:not([data-asset-done])');
+    const todo = scan('[data-asset]:not([data-asset-done])');
     todo.forEach(el => pending.add(el.getAttribute('data-asset')));
     if (todo.length) console.log('[lrc-assets] found ' + todo.length + ' asset reference(s)');
     if (pending.size) schedule();
